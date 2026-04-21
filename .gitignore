@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+
+data/raw/
+data/processed/
+outputs/checkpoints/
+outputs/figures/
+outputs/metrics/
+
+.venv/
+venv/
