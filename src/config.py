@@ -6,6 +6,7 @@ DATA_ROOT = PROJECT_ROOT / "data"
 RAW_DATA_ROOT = DATA_ROOT / "raw" / "ravdess"
 PROCESSED_ROOT = DATA_ROOT / "processed"
 AUDIO_FEATURE_DIR = PROCESSED_ROOT / "audio_features"
+WAV2VEC2_EMBED_DIR = PROCESSED_ROOT / "wav2vec2_embeddings"
 FACE_FRAME_DIR = PROCESSED_ROOT / "face_frames"
 OUTPUT_ROOT = PROJECT_ROOT / "outputs"
 CHECKPOINT_DIR = OUTPUT_ROOT / "checkpoints"
@@ -21,7 +22,7 @@ TARGET_EMOTIONS = {
     "07": "disgust",
 }
 
-LABELS = ["angry", "disgust", "fearful", "happy", "neutral", "sad"]
+LABELS = ["angry", "disgust", "fearful", "happy", "sad"]
 LABEL_TO_ID = {label: idx for idx, label in enumerate(LABELS)}
 ID_TO_LABEL = {idx: label for label, idx in LABEL_TO_ID.items()}
 

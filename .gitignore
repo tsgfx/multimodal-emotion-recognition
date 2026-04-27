@@ -7,6 +7,7 @@ data/processed/
 outputs/checkpoints/
 outputs/figures/
 outputs/metrics/
+.idea
 
 .venv/
 venv/

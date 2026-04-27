@@ -1,4 +1,5 @@
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import librosa
@@ -44,27 +45,64 @@ def extract_features(audio_path: Path) -> dict:
     }
 
 
+def process_row(row: dict, output_dir: Path, skip_existing: bool) -> dict:
+    out_path = output_dir / f"{row['sample_id']}.npz"
+    if skip_existing and out_path.exists():
+        return {
+            "sample_id": row["sample_id"],
+            "audio_feature_path": str(out_path),
+            "error": "",
+        }
+
+    features = extract_features(Path(row["audio_path"]))
+    np.savez_compressed(out_path, **features)
+    return {
+        "sample_id": row["sample_id"],
+        "audio_feature_path": str(out_path),
+        "error": "",
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extract Log-Mel and analysis features from audio.")
     parser.add_argument("--metadata", type=Path, default=PROCESSED_ROOT / "metadata.csv")
     parser.add_argument("--output_dir", type=Path, default=AUDIO_FEATURE_DIR)
+    parser.add_argument("--workers", type=int, default=1, help="Number of parallel worker processes.")
+    parser.add_argument("--skip_existing", action="store_true", help="Reuse existing .npz files when present.")
     args = parser.parse_args()
 
     ensure_dirs(args.output_dir)
     df = pd.read_csv(args.metadata)
-    feature_paths = []
     failures = []
+    results = {}
 
-    for row in tqdm(df.itertuples(index=False), total=len(df), desc="audio"):
-        out_path = args.output_dir / f"{row.sample_id}.npz"
-        try:
-            features = extract_features(Path(row.audio_path))
-            np.savez_compressed(out_path, **features)
-            feature_paths.append(str(out_path))
-        except Exception as exc:
-            feature_paths.append("")
-            failures.append({"sample_id": row.sample_id, "error": str(exc)})
+    rows = df.to_dict("records")
+    if args.workers <= 1:
+        for row in tqdm(rows, total=len(rows), desc="audio"):
+            try:
+                result = process_row(row, args.output_dir, args.skip_existing)
+            except Exception as exc:
+                result = {"sample_id": row["sample_id"], "audio_feature_path": "", "error": str(exc)}
+            results[result["sample_id"]] = result
+            if result["error"]:
+                failures.append({"sample_id": result["sample_id"], "error": result["error"]})
+    else:
+        with ProcessPoolExecutor(max_workers=args.workers) as executor:
+            futures = {
+                executor.submit(process_row, row, args.output_dir, args.skip_existing): row["sample_id"]
+                for row in rows
+            }
+            for future in tqdm(as_completed(futures), total=len(futures), desc="audio"):
+                sample_id = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    result = {"sample_id": sample_id, "audio_feature_path": "", "error": str(exc)}
+                results[sample_id] = result
+                if result["error"]:
+                    failures.append({"sample_id": result["sample_id"], "error": result["error"]})
 
+    feature_paths = [results.get(row.sample_id, {}).get("audio_feature_path", "") for row in df.itertuples(index=False)]
     df["audio_feature_path"] = feature_paths
     df.to_csv(args.metadata, index=False)
 
