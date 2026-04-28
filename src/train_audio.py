@@ -43,6 +43,12 @@ def main() -> None:
     parser.add_argument("--audio_dropout", type=float, default=0.3)
     parser.add_argument("--crnn_hidden_size", type=int, default=128)
     parser.add_argument("--crnn_num_layers", type=int, default=1)
+    parser.add_argument(
+        "--wav2vec2_pretrained",
+        type=str,
+        default="facebook/wav2vec2-base",
+        help="HuggingFace model id or local directory for wav2vec2 pretrained weights.",
+    )
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     parser.add_argument("--no_amp", action="store_true", help="Disable CUDA mixed precision training.")
@@ -58,6 +64,18 @@ def main() -> None:
         type=str,
         default="",
         help="Optional suffix for checkpoint and metric filenames, e.g. audio_cnn.<tag>.pt.",
+    )
+    parser.add_argument(
+        "--early_stopping_patience",
+        type=int,
+        default=8,
+        help="Stop training if monitored metric doesn't improve for this many consecutive epochs.",
+    )
+    parser.add_argument(
+        "--early_stopping_monitor",
+        choices=["val_loss", "val_macro_f1"],
+        default="val_loss",
+        help="Metric to monitor for early stopping. val_loss=lower is better; val_macro_f1=higher is better.",
     )
     args = parser.parse_args()
 
@@ -129,6 +147,7 @@ def main() -> None:
         crnn_num_layers=args.crnn_num_layers,
         cnn_variant="modern",
         wav2vec2_trainable=(args.audio_model == "wav2vec2_finetune"),
+        wav2vec2_pretrained=args.wav2vec2_pretrained,
     ).to(device)
 
     if args.audio_model == "wav2vec2_finetune":
@@ -147,6 +166,7 @@ def main() -> None:
         "crnn_hidden_size": args.crnn_hidden_size,
         "crnn_num_layers": args.crnn_num_layers,
         "cnn_variant": "modern",
+        "wav2vec2_pretrained": args.wav2vec2_pretrained,
     }
 
     best_f1 = -1.0
@@ -154,6 +174,10 @@ def main() -> None:
     checkpoint_path = tagged_path(default_checkpoint_path(args.audio_model), args.output_tag.strip())
     metric_path = tagged_path(default_metric_path(args.audio_model), args.output_tag.strip())
     train_mode = "raw_audio" if args.audio_model == "wav2vec2_finetune" else ("wav2vec2" if args.audio_model == "wav2vec2_classifier" else "audio")
+
+    epochs_without_improvement = 0
+    best_monitored = float("inf") if args.early_stopping_monitor == "val_loss" else -1.0
+
     for epoch in range(1, args.epochs + 1):
         train_loss, train_metrics = run_epoch(
             model, train_loader, criterion, optimizer, device, train_mode, use_amp=use_amp, scaler=scaler
@@ -164,10 +188,28 @@ def main() -> None:
             f"train_acc={train_metrics['accuracy']:.4f} val_acc={val_metrics['accuracy']:.4f} "
             f"val_macro_f1={val_metrics['macro_f1']:.4f}"
         )
-        if val_metrics["macro_f1"] > best_f1:
+
+        if args.early_stopping_monitor == "val_loss":
+            current_monitored = val_loss
+        else:
+            current_monitored = val_metrics["macro_f1"]
+
+        if args.early_stopping_monitor == "val_loss":
+            improved = current_monitored < best_monitored
+        else:
+            improved = current_monitored > best_monitored
+
+        if improved:
+            best_monitored = current_monitored
+            epochs_without_improvement = 0
             best_f1 = val_metrics["macro_f1"]
             best_metrics = {"epoch": epoch, "val_loss": val_loss, **val_metrics}
             save_checkpoint(model, checkpoint_path, best_metrics, model_config=model_config)
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement >= args.early_stopping_patience:
+                print(f"Early stopping triggered after {epoch} epochs (no improvement for {epochs_without_improvement} epochs)")
+                break
 
     save_json(best_metrics, metric_path)
     print(f"Saved best audio model to {checkpoint_path}")

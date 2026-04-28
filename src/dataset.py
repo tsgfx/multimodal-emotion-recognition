@@ -25,6 +25,7 @@ class MultimodalEmotionDataset(Dataset):
         specaugment_freq_masks: int = 0,
         specaugment_max_time_width: int = 16,
         specaugment_max_freq_width: int = 8,
+        face_augment: bool = False,
     ) -> None:
         if mode not in {"audio", "face", "fusion", "wav2vec2", "wav2vec2_fusion", "raw_audio", "raw_audio_fusion"}:
             raise ValueError("mode must be one of: audio, face, fusion, wav2vec2, wav2vec2_fusion, raw_audio, raw_audio_fusion")
@@ -61,6 +62,7 @@ class MultimodalEmotionDataset(Dataset):
         self.specaugment_freq_masks = max(0, int(specaugment_freq_masks))
         self.specaugment_max_time_width = max(0, int(specaugment_max_time_width))
         self.specaugment_max_freq_width = max(0, int(specaugment_max_freq_width))
+        self.face_augment = face_augment and split == "train"
         self._wav2vec2_cache = {}
 
     def __len__(self) -> int:
@@ -134,8 +136,25 @@ class MultimodalEmotionDataset(Dataset):
             image = Image.open(path).convert("RGB").resize((FACE_IMAGE_SIZE, FACE_IMAGE_SIZE))
             array = np.asarray(image, dtype=np.float32) / 255.0
             tensor = torch.from_numpy(array).permute(2, 0, 1)
+            if self.face_augment:
+                tensor = self._apply_face_augment(tensor)
             frames.append((tensor - self.face_mean) / self.face_std)
         return torch.stack(frames, dim=0)
+
+    def _apply_face_augment(self, tensor: torch.Tensor) -> torch.Tensor:
+        import random
+        if random.random() < 0.3:
+            tensor = torch.flip(tensor, dims=[2])
+        if random.random() < 0.3:
+            brightness = random.uniform(0.8, 1.2)
+            tensor = tensor * brightness
+            tensor = torch.clamp(tensor, 0.0, 1.0)
+        if random.random() < 0.2:
+            contrast = random.uniform(0.8, 1.2)
+            mean = tensor.mean(dim=(1, 2), keepdim=True)
+            tensor = (tensor - mean) * contrast + mean
+            tensor = torch.clamp(tensor, 0.0, 1.0)
+        return tensor
 
     def __getitem__(self, index: int) -> dict:
         row = self.df.iloc[index]

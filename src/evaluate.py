@@ -30,13 +30,16 @@ def tagged_path(path: Path, tag: str | None) -> Path:
 def resolve_audio_model_config(args, device: torch.device) -> dict:
     checkpoint = load_checkpoint_payload(args.audio_checkpoint, device)
     if args.audio_model == "auto":
-        return infer_audio_model_config_from_checkpoint(checkpoint)
+        config = infer_audio_model_config_from_checkpoint(checkpoint)
+        config["wav2vec2_pretrained"] = args.wav2vec2_pretrained
+        return config
     return {
         "audio_model": args.audio_model,
         "audio_dropout": args.audio_dropout,
         "crnn_hidden_size": args.crnn_hidden_size,
         "crnn_num_layers": args.crnn_num_layers,
         "cnn_variant": "modern",
+        "wav2vec2_pretrained": args.wav2vec2_pretrained,
     }
 
 
@@ -186,6 +189,7 @@ def evaluate_split(
         crnn_hidden_size=audio_model_config["crnn_hidden_size"],
         crnn_num_layers=audio_model_config["crnn_num_layers"],
         cnn_variant=audio_model_config["cnn_variant"],
+        wav2vec2_pretrained=audio_model_config.get("wav2vec2_pretrained", "facebook/wav2vec2-base"),
     ).to(device)
     face_model = FaceResNet(num_classes=len(LABELS), pretrained=False).to(device)
     load_checkpoint(audio_model, args.audio_checkpoint, device)
@@ -247,6 +251,8 @@ def main() -> None:
         choices=["weighted_average", "classwise_weighted_average", "confidence_weighted_average"],
         default="weighted_average",
     )
+    parser.add_argument("--wav2vec2_pretrained", type=str, default="facebook/wav2vec2-base",
+        help="Path to local wav2vec2 pretrained model or HuggingFace model name.")
     parser.add_argument("--output_tag", type=str, default="", help="Optional suffix for fusion metric filenames.")
     args = parser.parse_args()
 

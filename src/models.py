@@ -118,6 +118,7 @@ def build_audio_model(
     cnn_variant: str = "modern",
     wav2vec2_hidden_size: int = 768,
     wav2vec2_trainable: bool = False,
+    wav2vec2_pretrained: str = "facebook/wav2vec2-base",
 ) -> nn.Module:
     if audio_model == "cnn":
         if cnn_variant == "legacy":
@@ -131,11 +132,11 @@ def build_audio_model(
             num_layers=crnn_num_layers,
         )
     if audio_model == "wav2vec2":
-        return AudioWav2Vec2(num_classes=num_classes, dropout=dropout, trainable=False)
+        return AudioWav2Vec2(num_classes=num_classes, dropout=dropout, trainable=False, pretrained_model=wav2vec2_pretrained)
     if audio_model == "wav2vec2_classifier":
         return AudioWav2Vec2Classifier(num_classes=num_classes, hidden_size=wav2vec2_hidden_size, dropout=dropout)
     if audio_model == "wav2vec2_finetune":
-        return AudioWav2Vec2(num_classes=num_classes, dropout=dropout, trainable=True)
+        return AudioWav2Vec2(num_classes=num_classes, dropout=dropout, trainable=True, pretrained_model=wav2vec2_pretrained)
     raise ValueError(f"Unsupported audio_model={audio_model}")
 
 
@@ -148,6 +149,7 @@ def infer_audio_model_config_from_checkpoint(checkpoint: dict) -> dict:
             "crnn_hidden_size": int(saved.get("crnn_hidden_size", 128)),
             "crnn_num_layers": int(saved.get("crnn_num_layers", 1)),
             "cnn_variant": saved.get("cnn_variant", "modern"),
+            "wav2vec2_pretrained": saved.get("wav2vec2_pretrained", "facebook/wav2vec2-base"),
         }
 
     state_dict = checkpoint.get("model_state", {})
@@ -159,6 +161,7 @@ def infer_audio_model_config_from_checkpoint(checkpoint: dict) -> dict:
             "crnn_hidden_size": 128,
             "crnn_num_layers": 1,
             "cnn_variant": "modern",
+            "wav2vec2_pretrained": saved.get("wav2vec2_pretrained", "facebook/wav2vec2-base"),
         }
     if any(key.startswith("classifier.0.") for key in state_dict):
         return {
