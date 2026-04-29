@@ -109,17 +109,43 @@ class MultimodalEmotionDataset(Dataset):
         return tensor
 
     def _load_raw_audio(self, path: str) -> torch.Tensor:
+        def normalize_length(y: np.ndarray) -> np.ndarray:
+            target_len = int(AUDIO_SAMPLE_RATE * AUDIO_DURATION)
+            if len(y) < target_len:
+                return np.pad(y, (0, target_len - len(y)))
+            return y[:target_len]
+
         try:
             import librosa
+
+            y, _ = librosa.load(path, sr=AUDIO_SAMPLE_RATE, mono=True, duration=AUDIO_DURATION)
+            return torch.from_numpy(normalize_length(y).astype(np.float32))
+        except Exception as librosa_error:
+            fallback_error = librosa_error
+
+        try:
+            import soundfile as sf
+
+            y, sample_rate = sf.read(path, dtype="float32", always_2d=False)
+            if y.ndim > 1:
+                y = y.mean(axis=1)
+            max_len = int(sample_rate * AUDIO_DURATION)
+            y = y[:max_len]
+            if sample_rate != AUDIO_SAMPLE_RATE:
+                try:
+                    import soxr
+
+                    y = soxr.resample(y, sample_rate, AUDIO_SAMPLE_RATE, quality="HQ")
+                except ModuleNotFoundError:
+                    from scipy.signal import resample_poly
+
+                    gcd = np.gcd(sample_rate, AUDIO_SAMPLE_RATE)
+                    y = resample_poly(y, AUDIO_SAMPLE_RATE // gcd, sample_rate // gcd)
+            return torch.from_numpy(normalize_length(y).astype(np.float32))
         except ModuleNotFoundError:
-            raise ModuleNotFoundError("Loading raw audio requires librosa. Install with `pip install librosa`.")
-        y, _ = librosa.load(path, sr=AUDIO_SAMPLE_RATE, mono=True, duration=AUDIO_DURATION)
-        target_len = int(AUDIO_SAMPLE_RATE * AUDIO_DURATION)
-        if len(y) < target_len:
-            y = np.pad(y, (0, target_len - len(y)))
-        else:
-            y = y[:target_len]
-        return torch.from_numpy(y.astype(np.float32))
+            raise RuntimeError(
+                "Loading raw audio failed with librosa and fallback requires soundfile/scipy."
+            ) from fallback_error
 
     def _load_faces(self, face_dir: str) -> torch.Tensor:
         paths = sorted(Path(face_dir).glob("*.jpg"))

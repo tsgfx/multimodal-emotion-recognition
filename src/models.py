@@ -1,5 +1,37 @@
 import torch
+from pathlib import Path
 from torch import nn
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def resolve_pretrained_model_name_or_path(pretrained_model: str) -> str:
+    """Resolve local Wav2Vec2 paths across machines before falling back to HF ids."""
+    aliases = {
+        "base": "facebook/wav2vec2-base",
+        "wav2vec2-base": "facebook/wav2vec2-base",
+        "facebook-base": "facebook/wav2vec2-base",
+    }
+    value = aliases.get(pretrained_model, pretrained_model)
+    candidates = [Path(value)]
+
+    raw_path = Path(pretrained_model)
+    if raw_path.name:
+        candidates.extend(
+            [
+                PROJECT_ROOT / raw_path.name,
+                Path.cwd() / raw_path.name,
+            ]
+        )
+
+    if pretrained_model == "facebook/wav2vec2-base":
+        candidates.extend([PROJECT_ROOT / "wav2vec2-base", Path.cwd() / "wav2vec2-base"])
+
+    for candidate in candidates:
+        if candidate.exists() and (candidate / "config.json").exists():
+            return str(candidate)
+    return value
 
 
 class ConvBlock(nn.Module):
@@ -213,16 +245,28 @@ class AudioWav2Vec2(nn.Module):
             ) from exc
 
         self.trainable_encoder = trainable
-        self.wav2vec2 = Wav2Vec2Model.from_pretrained(pretrained_model)
-        self.hidden_size = self.wav2vec2.config.hidden_size
+        pretrained_model = resolve_pretrained_model_name_or_path(pretrained_model)
+        local_path = Path(pretrained_model)
+        if local_path.exists() and (local_path / "config.json").exists():
+            self.wav2vec2 = Wav2Vec2Model.from_pretrained(str(local_path), local_files_only=True)
+            self.hidden_size = self.wav2vec2.config.hidden_size
+            if trainable:
+                self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(str(local_path), local_files_only=True)
+            else:
+                self.feature_extractor = None
+        else:
+            self.wav2vec2 = Wav2Vec2Model.from_pretrained(pretrained_model)
+            self.hidden_size = self.wav2vec2.config.hidden_size
+            if trainable:
+                self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(pretrained_model)
+            else:
+                self.feature_extractor = None
 
         if not trainable:
             self.wav2vec2.eval()
             for param in self.wav2vec2.parameters():
                 param.requires_grad = False
-            self.feature_extractor = None
         else:
-            self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(pretrained_model)
             for param in self.wav2vec2.parameters():
                 param.requires_grad = True
 
