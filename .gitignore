@@ -3,10 +3,9 @@ __pycache__/
 .DS_Store
 
 data/
-outputs/checkpoints/
-outputs/figures/
-outputs/metrics/
+outputs/
 .idea
+.gradio
 
 .venv/
 venv/
